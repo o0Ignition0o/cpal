@@ -448,7 +448,7 @@ impl EventLoop {
                                 current_stream_descriptors.as_mut_ptr(),
                                 stream.num_descriptors as libc::c_uint,
                             );
-                            debug_assert_eq!(filled, stream.num_descriptors as libc::c_int);
+                            assert_eq!(filled, stream.num_descriptors as libc::c_int);
                             let events_to_look_for = match stream.stream_type {
                                 StreamType::Input => libc::POLLOUT,
                                 StreamType::Output => libc::POLLIN,
@@ -525,8 +525,7 @@ impl EventLoop {
 
                     // Determine the number of samples that are available to read/write.
                     let available = {
-                        let available = alsa::snd_pcm_avail(stream_inner.channel); // TODO: what about snd_pcm_avail_update?
-
+                        let available = alsa::snd_pcm_avail_update(stream_inner.channel);
                         if available == -32 {
                             // buffer underrun
                             stream_inner.buffer_len
@@ -608,8 +607,9 @@ impl EventLoop {
                                 SampleFormat::F32 => {
                                     let buffer = OutputBuffer {
                                         stream_inner: stream_inner,
-                                        // Note that we don't use `mem::uninitialized` because of sNaN.
-                                        buffer: iter::repeat(0.0).take(available).collect(),
+                                        buffer: iter::repeat(mem::uninitialized())
+                                            .take(available)
+                                            .collect(),
                                     };
 
                                     UnknownTypeOutputBuffer::F32(::OutputBuffer {
@@ -665,6 +665,9 @@ impl EventLoop {
             let new_stream_id = StreamId(self.next_stream_id.fetch_add(1, Ordering::Relaxed));
             assert_ne!(new_stream_id.0, usize::max_value()); // check for overflows
 
+            check_errors(alsa::snd_pcm_start(capture_handle))
+                .expect("could not start capture stream");
+
             let stream_inner = StreamInner {
                 stream_type: StreamType::Input,
                 id: new_stream_id.clone(),
@@ -678,9 +681,6 @@ impl EventLoop {
                 is_paused: false,
                 resume_trigger: Trigger::new(),
             };
-
-            check_errors(alsa::snd_pcm_start(capture_handle))
-                .expect("could not start capture stream");
 
             self.push_command(Command::NewStream(stream_inner));
             Ok(new_stream_id)
