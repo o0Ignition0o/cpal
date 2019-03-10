@@ -310,6 +310,11 @@ enum Command {
     DestroyStream(StreamId),
 }
 
+enum StreamType {
+    Output,
+    Input,
+}
+
 struct RunContext {
     // Descriptors to wait for. Always contains `pending_trigger.read_fd()` as first element.
     descriptors: Vec<libc::pollfd>,
@@ -323,6 +328,9 @@ struct StreamInner {
 
     // The ALSA channel.
     channel: *mut alsa::snd_pcm_t,
+
+    // The stream type. Will be useful to poll only for relevant revents
+    stream_type: StreamType,
 
     // When converting between file descriptors and `snd_pcm_t`, this is the number of
     // file descriptors that this `snd_pcm_t` uses.
@@ -431,19 +439,31 @@ impl EventLoop {
                             events: libc::POLLIN,
                             revents: 0,
                         }];
+                        let mut total_len = 1;
                         for stream in run_context.streams.iter() {
-                            run_context.descriptors.reserve(stream.num_descriptors);
-                            let len = run_context.descriptors.len();
+                            let mut current_stream_descriptors: Vec<libc::pollfd> =
+                                Vec::with_capacity(stream.num_descriptors);
                             let filled = alsa::snd_pcm_poll_descriptors(
                                 stream.channel,
-                                run_context.descriptors.as_mut_ptr().offset(len as isize),
+                                current_stream_descriptors.as_mut_ptr(),
                                 stream.num_descriptors as libc::c_uint,
                             );
                             debug_assert_eq!(filled, stream.num_descriptors as libc::c_int);
+                            let events_to_look_for = match stream.stream_type {
+                                StreamType::Input => libc::POLLOUT,
+                                StreamType::Output => libc::POLLIN,
+                            };
+
+                            total_len += stream.num_descriptors;
+                            current_stream_descriptors.set_len(stream.num_descriptors);
+                            current_stream_descriptors.iter_mut().for_each(|d| {
+                                d.events = events_to_look_for;
+                            });
                             run_context
                                 .descriptors
-                                .set_len(len + stream.num_descriptors);
+                                .append(&mut current_stream_descriptors);
                         }
+                        run_context.descriptors.set_len(total_len);
                     }
                 }
 
@@ -646,6 +666,7 @@ impl EventLoop {
             assert_ne!(new_stream_id.0, usize::max_value()); // check for overflows
 
             let stream_inner = StreamInner {
+                stream_type: StreamType::Input,
                 id: new_stream_id.clone(),
                 channel: capture_handle,
                 sample_format: format.data_type,
@@ -705,6 +726,7 @@ impl EventLoop {
             assert_ne!(new_stream_id.0, usize::max_value()); // check for overflows
 
             let stream_inner = StreamInner {
+                stream_type: StreamType::Output,
                 id: new_stream_id.clone(),
                 channel: playback_handle,
                 sample_format: format.data_type,
