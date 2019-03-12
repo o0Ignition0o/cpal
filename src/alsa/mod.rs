@@ -940,7 +940,7 @@ impl<'a, T> OutputBuffer<'a, T> {
                 } else if result < 0 {
                     check_errors(result as libc::c_int).expect("could not write pcm");
                 } else {
-                    assert_eq!(result as alsa::snd_pcm_uframes_t, to_write);
+                    debug_assert_eq!(result as alsa::snd_pcm_uframes_t, to_write);
                     break;
                 }
             }
