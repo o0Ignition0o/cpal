@@ -449,7 +449,7 @@ impl EventLoop {
                         current_stream_descriptors.as_mut_ptr(),
                         stream.num_descriptors as libc::c_uint,
                     );
-                    assert_eq!(filled, stream.num_descriptors as libc::c_int);
+                    debug_assert_eq!(filled, stream.num_descriptors as libc::c_int);
                     let events_to_look_for = match stream.stream_type {
                         StreamType::Input => libc::POLLOUT,
                         StreamType::Output => libc::POLLIN,
